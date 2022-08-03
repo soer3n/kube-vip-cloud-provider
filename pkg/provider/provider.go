@@ -18,6 +18,9 @@ import (
 // OutSideCluster allows the controller to be started using a local kubeConfig for testing
 var OutSideCluster bool
 
+// ExternalProvider specifies that the lb is running in a different cluster
+var ExternalProvider bool
+
 const (
 	//ProviderName is the name of the cloud provider
 	ProviderName = "kubevip"
@@ -27,6 +30,18 @@ const (
 
 	//KubeVipClientConfig is the default name of the load balancer config Map
 	KubeVipClientConfig = "kubevip"
+
+	//KubeVipUpstreamConfig is the default name of the upstream cluster config Map
+	KubeVipUpstreamConfig = "provider-config"
+
+	//KubeVipUpstreamNamespace is the default name of the upstream cluster config Map namespace
+	KubeVipUpstreamNamespace = "kube-system"
+
+	//KubeVipUpstreamClusterKey is the default name of the key for configuring cluster name in provider config Map
+	KubeVipUpstreamClusterKey = "cluster"
+
+	//KubeVipUpstreamConfigKey is the default name of the key for configuring cluster name in provider config Map
+	KubeVipUpstreamConfigKey = "config"
 
 	//KubeVipServicesKey is the key in the ConfigMap that has the services configuration
 	KubeVipServicesKey = "kubevip-services"
@@ -56,6 +71,10 @@ func newKubeVipCloudProvider(io.Reader) (cloudprovider.Interface, error) {
 	}
 
 	var cl *kubernetes.Clientset
+	var pc *kubernetes.Clientset
+	var upstreamNamespace string
+	var err error
+
 	if !OutSideCluster {
 		// This will attempt to load the configuration when running within a POD
 		cfg, err := rest.InClusterConfig()
@@ -79,8 +98,17 @@ func newKubeVipCloudProvider(io.Reader) (cloudprovider.Interface, error) {
 			return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
 		}
 	}
+
+	if ExternalProvider {
+		pc, upstreamNamespace, err = getExternalProviderData(cl)
+
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &KubeVipCloudProvider{
-		lb: newLoadBalancer(cl, ns, cm),
+		lb: newLoadBalancer(cl, pc, ns, upstreamNamespace, cm),
 	}, nil
 }
 
