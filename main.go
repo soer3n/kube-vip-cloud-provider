@@ -42,8 +42,8 @@ func main() {
 
 	command.Flags().BoolVar(&provider.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
 
-	// TODO: add flag for address type usage (internal or external)
-	command.Flags().BoolVar(&provider.ExternalProvider, "ExternalProvider", false, "Start Controller with client for external cluster for running load balancers")
+	// flag for enabling communicating with an upstream cluster
+	command.Flags().Var(&provider.ProviderType, "providerType", "Start Controller with client for external cluster for running load balancers or not")
 
 	// Set static flags for which we know the values.
 	command.Flags().VisitAll(func(fl *pflag.Flag) {

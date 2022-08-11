@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -18,8 +19,11 @@ import (
 // OutSideCluster allows the controller to be started using a local kubeConfig for testing
 var OutSideCluster bool
 
-// ExternalProvider specifies that the lb is running in a different cluster
-var ExternalProvider bool
+// ProviderType specifies if service creation happens inside current cluster or in another one
+var ProviderType KubeVipProviderType
+
+// DefaultProviderType is the name of the default provider type
+var DefaultProviderType = KubeVipInternalProvider
 
 const (
 	//ProviderName is the name of the cloud provider
@@ -45,6 +49,12 @@ const (
 
 	//KubeVipServicesKey is the key in the ConfigMap that has the services configuration
 	KubeVipServicesKey = "kubevip-services"
+
+	//KubeVipInternalProvider represents value for provider type internal
+	KubeVipInternalProvider = "internal"
+
+	//KubeVipExternalProvider represents value for provider type external
+	KubeVipExternalProvider = "external"
 )
 
 func init() {
@@ -56,11 +66,14 @@ type KubeVipCloudProvider struct {
 	lb cloudprovider.LoadBalancer
 }
 
+type KubeVipProviderType string
+
 var _ cloudprovider.Interface = &KubeVipCloudProvider{}
 
 func newKubeVipCloudProvider(io.Reader) (cloudprovider.Interface, error) {
 	ns := os.Getenv("KUBEVIP_NAMESPACE")
 	cm := os.Getenv("KUBEVIP_CONFIG_MAP")
+	kubeconfig := os.Getenv("KUBECONFIG")
 
 	if cm == "" {
 		cm = KubeVipCloudConfig
@@ -70,10 +83,11 @@ func newKubeVipCloudProvider(io.Reader) (cloudprovider.Interface, error) {
 		ns = "default"
 	}
 
+	if kubeconfig == "" {
+		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	}
+
 	var cl *kubernetes.Clientset
-	var pc *kubernetes.Clientset
-	var upstreamNamespace string
-	var err error
 
 	if !OutSideCluster {
 		// This will attempt to load the configuration when running within a POD
@@ -88,7 +102,7 @@ func newKubeVipCloudProvider(io.Reader) (cloudprovider.Interface, error) {
 		}
 		// use the current context in kubeconfig
 	} else {
-		config, err := clientcmd.BuildConfigFromFlags("", filepath.Join(os.Getenv("HOME"), ".kube", "config"))
+		config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
 			panic(err.Error())
 		}
@@ -99,16 +113,8 @@ func newKubeVipCloudProvider(io.Reader) (cloudprovider.Interface, error) {
 		}
 	}
 
-	if ExternalProvider {
-		pc, upstreamNamespace, err = getExternalProviderData(cl)
-
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return &KubeVipCloudProvider{
-		lb: newLoadBalancer(cl, pc, ns, upstreamNamespace, cm),
+		lb: newLoadBalancer(cl, ns, cm),
 	}, nil
 }
 
@@ -133,4 +139,29 @@ func (p *KubeVipCloudProvider) LoadBalancer() (cloudprovider.LoadBalancer, bool)
 // ProviderName returns the cloud provider ID.
 func (p *KubeVipCloudProvider) ProviderName() string {
 	return ProviderName
+}
+
+// implement an own simple flag type for provider type...
+// String is used both by fmt.Print and by Cobra in help text
+func (p *KubeVipProviderType) String() string {
+	if string(*p) == "" {
+		return string(DefaultProviderType)
+	}
+	return string(*p)
+}
+
+// Set must have pointer receiver so it doesn't change the value of a copy
+func (p *KubeVipProviderType) Set(v string) error {
+	switch v {
+	case "internal", "external":
+		*p = KubeVipProviderType(v)
+		return nil
+	default:
+		return errors.New(`must be one of "internal" or "external"`)
+	}
+}
+
+// Type is only used in help text
+func (p *KubeVipProviderType) Type() string {
+	return "KubeVipProviderType"
 }
