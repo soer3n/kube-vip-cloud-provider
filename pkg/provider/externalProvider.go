@@ -89,7 +89,8 @@ func (k *kubevipExternalLoadBalancerManager) syncExternalLoadBalancer(ctx contex
 		return nil, err
 	}
 
-	if err = k.updateServiceObject(k.kubeClient, ctx, service, loadBalancerIP); err != nil {
+	klog.Infoln("update service in downstream cluster")
+	if err = k.updateServiceObject(ctx, service, loadBalancerIP); err != nil {
 		return nil, err
 	}
 
@@ -168,7 +169,7 @@ func (k *kubevipExternalLoadBalancerManager) syncUpstreamService(ctx context.Con
 			loadBalancerIP = recentService.Spec.LoadBalancerIP
 
 			if !reflect.DeepEqual(service.Spec.Ports, recentService.Spec.Ports) {
-				klog.Infoln("updating service object %v in upstream cluster", service.Name)
+				klog.Infoln("updating service object" + service.Name + "in upstream cluster")
 				// Update the actual service with the address and the labels
 				newPorts := []v1.ServicePort{}
 				for _, port := range service.Spec.Ports {
@@ -281,9 +282,9 @@ func (k *kubevipExternalLoadBalancerManager) syncUpstreamEndpoints(ctx context.C
 	})
 }
 
-func (k *kubevipExternalLoadBalancerManager) updateServiceObject(cl *kubernetes.Clientset, ctx context.Context, service *v1.Service, loadBalancerIP string) error {
+func (k *kubevipExternalLoadBalancerManager) updateServiceObject(ctx context.Context, service *v1.Service, loadBalancerIP string) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		recentService, getErr := cl.CoreV1().Services(service.Namespace).Get(ctx, service.Name, metav1.GetOptions{})
+		recentService, getErr := k.kubeClient.CoreV1().Services(service.Namespace).Get(ctx, service.Name, metav1.GetOptions{})
 		if getErr != nil {
 			return getErr
 		}
@@ -303,7 +304,7 @@ func (k *kubevipExternalLoadBalancerManager) updateServiceObject(cl *kubernetes.
 			recentService.Spec.LoadBalancerIP = loadBalancerIP
 
 			// Update the actual service with the address and the labels
-			_, updateErr := cl.CoreV1().Services(recentService.Namespace).Update(ctx, recentService, metav1.UpdateOptions{})
+			_, updateErr := k.kubeClient.CoreV1().Services(recentService.Namespace).Update(ctx, recentService, metav1.UpdateOptions{})
 
 			return updateErr
 		}
